@@ -4,9 +4,10 @@ import copy as copy_module
 from build123d import *
 from build123d.build_common import WorkplaneList, flatten_sequence, validate_inputs
 from build123d.objects_curve import BaseEdgeObject
+from build123d.geometry import Axis, Vector, VectorLike, TOLERANCE
+from build123d.topology import Edge, Face, Wire, Curve
 
-from ocp_vscode import show, show_object, set_viewer_config, set_port, set_defaults, get_defaults
-set_port(3940)
+from scipy.optimize import minimize
 
 
 class PointArcTangentLine(BaseLineObject):
@@ -73,6 +74,150 @@ class PointArcTangentLine(BaseLineObject):
 
         tangent = Edge.make_line(intersect, tangent_point)
         super().__init__(tangent, mode)
+
+
+class PointArcTangentArc(BaseEdgeObject):
+    """Line Object: Point Arc Tangent Arc
+
+    Create an arc defined by a point/tangent pair and another line which the other end
+    is tangent to.
+
+    Contains a solver.
+
+    Args:
+        pnt (VectorLike): starting point of tangent arc
+        tangent (VectorLike): direction at starting point of tangent arc
+        other (Union[Curve, Edge, Wire]): reference line
+        keep (Keep, optional): select which arc to keep Defaults to Keep.TOP.
+        mode (Mode, optional): combination mode. Defaults to Mode.ADD.
+
+    Raises:
+        RuntimeError: Point is already tangent to other!
+        RuntimeError: No tangent arc found.
+    """
+
+    _applies_to = [BuildLine._tag]
+
+    def __init__(
+        self,
+        pnt: VectorLike,
+        tangent: VectorLike,
+        other: Curve | Edge | Wire,
+        keep: Keep = Keep.TOP,
+        mode: Mode = Mode.ADD,
+    ):
+        context: BuildLine | None = BuildLine._get_context(self)
+        validate_inputs(context, self)
+
+        arc_pt = WorkplaneList.localize(pnt)
+        wp_tangent = WorkplaneList.localize(tangent).normalized()
+
+        if context is None:
+            # Making the plane validates pnt, tangent, and other are coplanar
+            workplane = Edge.make_line(arc_pt, arc_pt + wp_tangent).common_plane(
+                *other.edges()
+            )
+            if workplane is None:
+                raise ValueError("PointArcTangentArc only works on a single plane")
+        else:
+            workplane = copy_module.copy(
+                WorkplaneList._get_context().workplanes[0]
+            )
+
+        arc_tangent = Vector(tangent).transform(
+            workplane.reverse_transform, is_direction=True
+        ).normalized()
+        rotation_axis = Axis(workplane.origin, workplane.z_dir)
+
+        # Determine where arc_point is located relative to other
+        # ref forms a bisecting line parallel to arc tangent with same distance from other
+        # center as arc point in direction of arc tangent
+        normal = arc_tangent.cross(workplane.z_dir)
+        ref_scale = (other.arc_center - arc_pt).dot(-arc_tangent)
+        ref = ref_scale * arc_tangent + other.arc_center
+        ref_to_point = (arc_pt - ref).dot(normal)
+
+        keep_sign = -1 if keep == Keep.TOP else 1
+        if keep_sign * ref_to_point == other.radius:
+            raise RuntimeError("Point is already tangent to other!")
+
+        # Use magnitude and sign of ref to arc point along with keep to determine
+        #   which "side" angle the arc center will be on
+        # - the arc center is the same side if the point is further from ref than other radius
+        # - minimize type determines near or far side arc to minimize to
+        side_sign = 1 if ref_to_point < 0 else -1
+        minimize_type = 1
+        if abs(ref_to_point) < other.radius:
+            # point/tangent pointing inside other, both arcs near
+            if keep == Keep.TOP:
+                angle = 90
+            else:
+                angle = -90
+        else:
+            # point/tangent pointing outside other, one near arc one far
+            angle = side_sign * -90
+            if keep == Keep.TOP:
+                minimize_type = side_sign * -minimize_type
+            else:
+                minimize_type = side_sign * minimize_type
+
+        # Protect against massive circles that are effectively straight lines
+        max_size = 10 * other.bounding_box().add(arc_pt).diagonal
+
+        # Function to be minimized - note radius is a numpy array
+        def func(radius, perpendicular_bisector, minimize_type):
+            center = arc_pt + perpendicular_bisector * radius[0]
+            separation = other.distance_to(center)
+
+            if minimize_type == 1:
+                # near side arc
+                target = abs(separation - radius)
+            elif minimize_type == -1:
+                # far side arc
+                target = abs(separation - radius + other.radius * 2)
+
+            return target
+
+        # Find arc center by minimizing func result
+        perpendicular_bisector = arc_tangent.rotate(rotation_axis, angle)
+        result = minimize(
+            func,
+            x0=0,
+            args=(perpendicular_bisector, minimize_type),
+            method="Nelder-Mead",
+            bounds=[(0.0, max_size)],
+            tol=TOLERANCE,
+        )
+        arc_radius = result.x[0]
+        arc_center = arc_pt + perpendicular_bisector * arc_radius
+
+        # dir needs to be flipped for far arc
+        tangent_normal = (other.arc_center - arc_center).normalized()
+        tangent_dir = minimize_type * tangent_normal.cross(workplane.z_dir)
+        tangent_point = arc_radius * tangent_normal + arc_center
+
+        # Confirm tangent point is on other
+        if abs(other.radius - (tangent_point - other.arc_center).length) > TOLERANCE:
+            # If we find the point on other where the tangent is parallel to arc tangent
+            # 1. form a line 1 following that tangent
+            # 2. form a line 2 from arc point to that point
+            # as the distance between the line 1 and arc_point goes to 0 and
+            # the angle between line 2 and arc tangent approaches 0 or 180
+            # the minimize will fail at max_size
+            #
+            # distance = ref_to_point + minimize_type * (angle / 90) * other.radius
+            # angle = (other.arc_center - side_sign * normal * other.radius - arc_pt).get_angle(arc_tangent)
+            #
+            # This should be the only way this error arises
+            raise RuntimeError("No tangent arc found, no tangent point found")
+
+        # Confirm new tangent point is colinear with point tangent on other
+        other_dir = other.tangent_at(tangent_point)
+        if tangent_dir.get_angle(other_dir) > TOLERANCE:
+            raise RuntimeError("No tangent arc found, found tangent out of tolerance")
+
+        arc = TangentArc(arc_pt, tangent_point, tangent=arc_tangent)
+        super().__init__(arc.edge(), mode=mode)
 
 
 class ArcArcTangentLine(BaseEdgeObject):
@@ -200,8 +345,6 @@ class ArcArcTangentArc(BaseEdgeObject):
             workplane = copy_module.copy(
                 WorkplaneList._get_context().workplanes[0]
             )
-        print(workplane.z_dir, start_arc.normal())
-        show_object([workplane, start_arc.normal(), end_arc.normal()])
 
         side_sign = 1 if side == Side.LEFT else -1
         keep_sign = 1 if keep == Keep.INSIDE else -1
