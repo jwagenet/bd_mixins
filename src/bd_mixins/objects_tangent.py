@@ -10,7 +10,7 @@ from build123d.topology import Edge, Face, Wire, Curve
 from scipy.optimize import minimize
 
 
-class PointArcTangentLine(BaseLineObject):
+class PointArcTangentLine(BaseEdgeObject):
     """Line Object: Point Arc Tangent Line
 
     Create a straight, tangent line from a point to a circular arc.
@@ -32,8 +32,8 @@ class PointArcTangentLine(BaseLineObject):
         ):
 
         side_sign = {
-            Side.LEFT: 1,
-            Side.RIGHT: -1,
+            Side.LEFT: -1,
+            Side.RIGHT: 1,
         }
 
         context: BuildLine | None = BuildLine._get_context(self)
@@ -88,7 +88,7 @@ class PointArcTangentArc(BaseEdgeObject):
         pnt (VectorLike): starting point of tangent arc
         tangent (VectorLike): direction at starting point of tangent arc
         other (Union[Curve, Edge, Wire]): reference line
-        keep (Keep, optional): select which arc to keep Defaults to Keep.TOP.
+        side (Side, optional): select which arc to keep Defaults to Side.LEFT.
         mode (Mode, optional): combination mode. Defaults to Mode.ADD.
 
     Raises:
@@ -103,7 +103,7 @@ class PointArcTangentArc(BaseEdgeObject):
         pnt: VectorLike,
         tangent: VectorLike,
         other: Curve | Edge | Wire,
-        keep: Keep = Keep.TOP,
+        side: Side = Side.LEFT,
         mode: Mode = Mode.ADD,
     ):
         context: BuildLine | None = BuildLine._get_context(self)
@@ -137,8 +137,8 @@ class PointArcTangentArc(BaseEdgeObject):
         ref = ref_scale * arc_tangent + other.arc_center
         ref_to_point = (arc_pt - ref).dot(normal)
 
-        keep_sign = -1 if keep == Keep.TOP else 1
-        if keep_sign * ref_to_point == other.radius:
+        side_sign = -1 if side == Side.LEFT else 1
+        if side_sign * ref_to_point == other.radius:
             raise RuntimeError("Point is already tangent to other!")
 
         # Use magnitude and sign of ref to arc point along with keep to determine
@@ -149,14 +149,14 @@ class PointArcTangentArc(BaseEdgeObject):
         minimize_type = 1
         if abs(ref_to_point) < other.radius:
             # point/tangent pointing inside other, both arcs near
-            if keep == Keep.TOP:
+            if side == Side.LEFT:
                 angle = 90
             else:
                 angle = -90
         else:
             # point/tangent pointing outside other, one near arc one far
             angle = side_sign * -90
-            if keep == Keep.TOP:
+            if side == Side.LEFT:
                 minimize_type = side_sign * -minimize_type
             else:
                 minimize_type = side_sign * minimize_type
