@@ -1,11 +1,11 @@
 [project]
-name = "pycad-workspace"
+name = "bd_mixins"
 version = "0.1.0"
-description = "Personal workspace for python codeCAD projects, demos, and examples."
+description = "Mixin test bed for build123d objects"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "build123d==0.9.0",
+    "build123d==0.9.1",
     "ocp-vscode==2.6.4",
     "pip>=25.0",
     "ruff>=0.9.3",
@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [tool.ruff]
-line-length = 120
+line-length = 88
 indent-width = 4
 target-version = "py311"
 

@@ -8,8 +8,4 @@ wheels/
 
 # Virtual environments
 .venv
-
 *.code-workspace
-
-test.py
-examples/
