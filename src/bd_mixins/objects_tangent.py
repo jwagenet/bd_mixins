@@ -8,6 +8,7 @@ from build123d.geometry import Axis, Vector, VectorLike, TOLERANCE
 from build123d.topology import Edge, Face, Wire, Curve
 
 from scipy.optimize import minimize
+import sympy
 
 class PointArcTangentLine(BaseEdgeObject):
     """Line Object: Point Arc Tangent Line
@@ -331,9 +332,7 @@ class ArcArcTangentArc(BaseEdgeObject):
 
         if context is None:
             # Making the plane validates start arc and end arc are coplanar
-            workplane = start_arc.edge().common_plane(
-                end_arc.edge()
-            )
+            workplane = start_arc.edge().common_plane(end_arc.edge())
             if workplane is None:
                 raise ValueError("ArcArcTangentArc only works on a single plane.")
 
@@ -354,21 +353,30 @@ class ArcArcTangentArc(BaseEdgeObject):
         # make a normal vector for sorting intersections
         midline = points[1] - points[0]
         normal = side_sign * midline.cross(workplane.z_dir)
-        net_radius = radius + keep_sign * (radii[0] + radii[1]) / 2
 
-        # Technically the range midline.length / 2 < radius < math.inf should be valid
-        if net_radius <= midline.length / 2:
-            raise ValueError(f"The arc radius is too small. Should be greater than {(midline.length - keep_sign * (radii[0] + radii[1])) / 2} (and probably larger).")
+        # The range midline.length / 2 < tangent radius < math.inf should be valid
+        # Sometimes fails if min_radius == radius, so using >=
+        min_radius = (midline.length - keep_sign * (radii[0] + radii[1])) / 2
+        if min_radius >= radius:
+            raise ValueError(f"The arc radius is too small. Should be greater than {min_radius}.")
 
-        # Current intersection method doesn't work out to expected range and may return 0
-        # Workaround to catch error midline.length / net_radius needs to be less than 1.888 or greater than .666 from testing
-        max_ratio = 1.888
-        min_ratio = .666
-        if midline.length / net_radius > max_ratio:
-            raise ValueError(f"The arc radius is too small. Should be greater than {midline.length / max_ratio - keep_sign * (radii[0] + radii[1]) / 2}.")
+        old_method = False
+        if old_method:
+            net_radius = radius + keep_sign * (radii[0] + radii[1]) / 2
 
-        if midline.length / net_radius < min_ratio:
-            raise ValueError(f"The arc radius is too large. Should be less than {midline.length / min_ratio - keep_sign * (radii[0] + radii[1]) / 2}.")
+            # Technically the range midline.length / 2 < radius < math.inf should be valid
+            if net_radius <= midline.length / 2:
+                raise ValueError(f"The arc radius is too small. Should be greater than {(midline.length - keep_sign * (radii[0] + radii[1])) / 2} (and probably larger).")
+
+            # Current intersection method doesn't work out to expected range and may return 0
+            # Workaround to catch error midline.length / net_radius needs to be less than 1.888 or greater than .666 from testing
+            max_ratio = 1.888
+            min_ratio = .666
+            if midline.length / net_radius > max_ratio:
+                raise ValueError(f"The arc radius is too small. Should be greater than {midline.length / max_ratio - keep_sign * (radii[0] + radii[1]) / 2}.")
+
+            if midline.length / net_radius < min_ratio:
+                raise ValueError(f"The arc radius is too large. Should be less than {midline.length / min_ratio - keep_sign * (radii[0] + radii[1]) / 2}.")
 
         # Method:
         # https://www.youtube.com/watch?v=-STj2SSv6TU
@@ -378,13 +386,21 @@ class ArcArcTangentArc(BaseEdgeObject):
         #   arcs made by subtracting the outer radius from the point radii
         # - then it's a matter of finding the points where the connecting lines
         #   intersect the point circles
-        ref_arcs = [CenterArc(points[i], keep_sign * radii[i] + radius, start_angle=0, arc_size=360) for i in range(len(arcs))]
-        ref_intersections = ref_arcs[0].edge().intersect(ref_arcs[1].edge())
 
-        try:
+        if old_method:
+            ref_arcs = [CenterArc(points[i], keep_sign * radii[i] + radius, start_angle=0, arc_size=360) for i in range(len(arcs))]
+            ref_intersections = ref_arcs[0].edge().intersect(ref_arcs[1].edge())
+
+            try:
+                arc_center = ref_intersections.sort_by(Axis(points[0], normal))[0]
+            except AttributeError as exception:
+                raise RuntimeError("Arc radius thought to be okay, but is too big or small to find intersection.")
+
+        else:
+            local = [workplane.to_local_coords(p) for p in points]
+            ref_circles = [sympy.Circle(sympy.Point2D(local[i].X, local[i].Y), keep_sign * radii[i] + radius) for i in range(len(arcs))]
+            ref_intersections = ShapeList([workplane.from_local_coords(Vector(float(sympy.N(p.x)), float(sympy.N(p.y)))) for p in sympy.intersection(*ref_circles)])
             arc_center = ref_intersections.sort_by(Axis(points[0], normal))[0]
-        except AttributeError as exception:
-            raise RuntimeError("Arc radius thought to be okay, but is too big or small to find intersection.")
 
         intersect = [points[i] + keep_sign * radii[i] * (Vector(arc_center) - points[i]).normalized() for i in range(len(arcs))]
 
