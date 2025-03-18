@@ -39,14 +39,19 @@ class PointArcTangentLine(BaseEdgeObject):
         context: BuildLine | None = BuildLine._get_context(self)
         validate_inputs(context, self)
 
+        if arc.geom_type != GeomType.CIRCLE:
+            raise ValueError("Arc must have GeomType.CIRCLE")
+
         tangent_point  = WorkplaneList.localize(point)
         if context is None:
             # Making the plane validates points and arc are coplanar
-            workplane = Edge.make_line(tangent_point, arc.arc_center).common_plane(
+            coplane = Edge.make_line(tangent_point, arc.arc_center).common_plane(
                 *arc.edges()
             )
-            if workplane is None:
-                raise ValueError("PointArcTangentLine only works on a single plane.")
+            if coplane is None:
+                raise ValueError("PointArcTangentLine only works on a single plane")
+
+            workplane = Plane(coplane.origin, z_dir=arc.normal())
         else:
             workplane = copy_module.copy(
                 WorkplaneList._get_context().workplanes[0]
@@ -296,21 +301,29 @@ class ArcArcTangentLine(BaseEdgeObject):
         self,
         start_arc: Curve | Edge | Wire,
         end_arc: Curve | Edge | Wire,
-        side=Side.LEFT,
-        keep=Keep.INSIDE,
-        mode=Mode.ADD,
+        side: Side = Side.LEFT,
+        keep: Keep = Keep.INSIDE,
+        mode: Mode = Mode.ADD,
         ):
 
         context: BuildLine | None = BuildLine._get_context(self)
         validate_inputs(context, self)
 
+        if start_arc.geom_type != GeomType.CIRCLE:
+            raise ValueError("Start arc must have GeomType.CIRCLE")
+
+        if end_arc.geom_type != GeomType.CIRCLE:
+            raise ValueError("End arc must have GeomType.CIRCLE")
+
         if context is None:
             # Making the plane validates start arc and end arc are coplanar
-            workplane = start_arc.edge().common_plane(
+            coplane = start_arc.edge().common_plane(
                 *end_arc.edges()
             )
-            if workplane is None:
+            if coplane is None:
                 raise ValueError("ArcArcTangentLine only works on a single plane.")
+
+            workplane = Plane(coplane.origin, z_dir=arc.normal())
         else:
             workplane = copy_module.copy(
                 WorkplaneList._get_context().workplanes[0]
@@ -387,6 +400,12 @@ class ArcArcTangentArc(BaseEdgeObject):
 
         context: BuildLine | None = BuildLine._get_context(self)
         validate_inputs(context, self)
+
+        if start_arc.geom_type != GeomType.CIRCLE:
+            raise ValueError("Start arc must have GeomType.CIRCLE")
+
+        if end_arc.geom_type != GeomType.CIRCLE:
+            raise ValueError("End arc must have GeomType.CIRCLE")
 
         if context is None:
             # Making the plane validates start arc and end arc are coplanar
