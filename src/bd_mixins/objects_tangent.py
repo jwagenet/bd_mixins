@@ -124,7 +124,6 @@ class PointArcTangentArc(BaseEdgeObject):
                 raise ValueError("PointArcTangentArc only works on a single plane")
 
             workplane = Plane(coplane.origin, z_dir=arc.normal())
-
         else:
             workplane = copy_module.copy(
                 WorkplaneList._get_context().workplanes[0]
@@ -275,7 +274,7 @@ class PointArcTangentArc(BaseEdgeObject):
             raise RuntimeError("No tangent arc found, found tangent out of tolerance")
 
         arc = TangentArc(arc_point, tangent_point, tangent=arc_tangent)
-        super().__init__(arc.edge(), mode=mode)
+        super().__init__(arc, mode=mode)
 
 
 class ArcArcTangentLine(BaseEdgeObject):
@@ -372,7 +371,7 @@ class ArcArcTangentArc(BaseEdgeObject):
             Defaults to Side.LEFT
         keep (Keep): which tangent arc to keep, INSIDE or OUTSIDE. 
             Defaults to Keep.INSIDE
-        mode (Mode, optional): combination mode. Defaults to Mode.ADD.
+        mode (Mode, optional): combination mode. Defaults to Mode.ADD
     """
 
     def __init__(
@@ -380,9 +379,10 @@ class ArcArcTangentArc(BaseEdgeObject):
         start_arc: Curve | Edge | Wire,
         end_arc: Curve | Edge | Wire,
         radius: float,
-        side=Side.LEFT,
-        keep=Keep.INSIDE,
-        mode=Mode.ADD,
+        side: Side = Side.LEFT,
+        keep: Keep = Keep.INSIDE,
+        mode: Mode = Mode.ADD,
+        use_sympy: bool = False
         ):
 
         context: BuildLine | None = BuildLine._get_context(self)
@@ -390,13 +390,11 @@ class ArcArcTangentArc(BaseEdgeObject):
 
         if context is None:
             # Making the plane validates start arc and end arc are coplanar
-            workplane = start_arc.edge().common_plane(end_arc.edge())
-            if workplane is None:
-                raise ValueError("ArcArcTangentArc only works on a single plane.")
+            coplane = start_arc.edge().common_plane(end_arc.edge())
+            if coplane is None:
+                raise ValueError("ArcArcTangentArc only works on a single plane")
 
-            # I dont know why, but workplane.z_dir is flipped from expected
-            if workplane.z_dir != start_arc.normal():
-                workplane = -workplane
+            workplane = Plane(coplane.origin, z_dir=arc.normal())
         else:
             workplane = copy_module.copy(
                 WorkplaneList._get_context().workplanes[0]
@@ -418,8 +416,7 @@ class ArcArcTangentArc(BaseEdgeObject):
         if min_radius >= radius:
             raise ValueError(f"The arc radius is too small. Should be greater than {min_radius}.")
 
-        old_method = False
-        if old_method:
+        if not use_sympy:
             net_radius = radius + keep_sign * (radii[0] + radii[1]) / 2
 
             # Technically the range midline.length / 2 < radius < math.inf should be valid
@@ -445,7 +442,7 @@ class ArcArcTangentArc(BaseEdgeObject):
         # - then it's a matter of finding the points where the connecting lines
         #   intersect the point circles
 
-        if old_method:
+        if not use_sympy:
             ref_arcs = [CenterArc(points[i], keep_sign * radii[i] + radius, start_angle=0, arc_size=360) for i in range(len(arcs))]
             ref_intersections = ref_arcs[0].edge().intersect(ref_arcs[1].edge())
 
