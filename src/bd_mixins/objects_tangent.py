@@ -23,6 +23,8 @@ class PointArcTangentLine(BaseEdgeObject):
         mode (Mode, optional): combination mode. Defaults to Mode.ADD
     """
 
+    _applies_to = [BuildLine._tag]
+
     def __init__(
         self,
         point: VectorLike,
@@ -297,6 +299,8 @@ class ArcArcTangentLine(BaseEdgeObject):
         mode (Mode, optional): combination mode. Defaults to Mode.ADD
     """
 
+    _applies_to = [BuildLine._tag]
+
     def __init__(
         self,
         start_arc: Curve | Edge | Wire,
@@ -386,6 +390,8 @@ class ArcArcTangentArc(BaseEdgeObject):
             Defaults to Keep.INSIDE
         mode (Mode, optional): combination mode. Defaults to Mode.ADD
     """
+
+    _applies_to = [BuildLine._tag]
 
     def __init__(
         self,
