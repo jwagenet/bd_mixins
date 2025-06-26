@@ -9,3 +9,7 @@ wheels/
 # Virtual environments
 .venv
 *.code-workspace
+
+# gltf output
+*.gltf
+*.bin
